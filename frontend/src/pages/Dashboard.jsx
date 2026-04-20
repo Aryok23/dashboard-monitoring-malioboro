@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [cameras, setCameras] = useState([])
   const [detections, setDetections] = useState([])
   const [counts, setCounts] = useState({})
+  const [frameSize, setFrameSize] = useState(null)
   const [activeCamera, setActiveCamera] = useState(null)
   const [wsConnected, setWsConnected] = useState(false)
 
@@ -57,6 +58,9 @@ export default function Dashboard() {
         if (msg.type === 'detection') {
           setDetections(msg.detections || [])
           setCounts(msg.counts || {})
+          if (msg.frame_width && msg.frame_height) {
+            setFrameSize({ width: msg.frame_width, height: msg.frame_height })
+          }
           // Sync dropdown to whatever camera the backend is actually streaming
           setActiveCamera((prev) => {
             if (prev && prev.id === msg.camera_id) return prev
@@ -136,6 +140,8 @@ export default function Dashboard() {
           <LiveFeed
             camera={activeCamera}
             connected={wsConnected}
+            detections={detections}
+            frameSize={frameSize}
           />
           <DetectionOverlay counts={counts} />
           <CrowdChart activeCamera={activeCamera} cameras={cameras} />

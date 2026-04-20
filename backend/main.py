@@ -17,7 +17,7 @@ load_dotenv()
 
 from .auth.auth_handler import get_current_user, login
 from .database import db as database
-from .inference.detector import get_counts
+from .inference.detector import get_counts, load_model
 from .stream.camera_manager import CameraManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -55,12 +55,15 @@ _ALERT_COOLDOWN_SECS = 300
 
 def _on_active_frame(camera_id: int, frame, detections: list) -> None:
     counts = get_counts(detections)
+    h, w = frame.shape[:2] if frame is not None else (720, 1280)
 
     payload = {
         "type": "detection",
         "camera_id": camera_id,
         "detections": detections,
         "counts": counts,
+        "frame_width": w,
+        "frame_height": h,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -135,6 +138,11 @@ async def lifespan(app: FastAPI):
 
     _loop = asyncio.get_event_loop()
     await database.init_db()
+
+    # Load pretrained YOLOv8n — downloads automatically on first run (~6 MB)
+    # Replace "yolov8n.pt" with your fine-tuned "best.pt" path when ready
+    yolo_model = os.getenv("YOLO_MODEL", "yolov8n.pt")
+    load_model(yolo_model)
 
     p_thresh = int(os.getenv("ALERT_PEOPLE_THRESHOLD", "50"))
     v_thresh = int(os.getenv("ALERT_VEHICLE_THRESHOLD", "30"))

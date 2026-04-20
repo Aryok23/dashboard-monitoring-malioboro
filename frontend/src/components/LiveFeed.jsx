@@ -3,22 +3,101 @@ import { useEffect, useRef, useState } from 'react'
 
 const BACKEND = 'http://localhost:8000'
 
-export default function LiveFeed({ camera, connected }) {
-  const videoRef = useRef(null)
-  const hlsRef = useRef(null)
+const CLASS_COLORS = {
+  people:     '#3b82f6',   // blue
+  bicycle:    '#22c55e',   // green
+  motorcycle: '#eab308',   // yellow
+  car:        '#f97316',   // orange
+  bus:        '#ef4444',   // red
+  truck:      '#a855f7',   // purple
+  bajaj:      '#06b6d4',   // cyan
+  becak:      '#06b6d4',
+  andong:     '#06b6d4',
+}
+
+function drawDetections(canvas, video, detections, frameSize) {
+  const ctx = canvas.getContext('2d')
+
+  // Match canvas pixel size to the video element's displayed size
+  const elemW = video.clientWidth
+  const elemH = video.clientHeight
+  canvas.width = elemW
+  canvas.height = elemH
+  ctx.clearRect(0, 0, elemW, elemH)
+
+  if (!detections || detections.length === 0) return
+
+  // Original frame dimensions used for inference
+  const srcW = frameSize?.width  || video.videoWidth  || 1280
+  const srcH = frameSize?.height || video.videoHeight || 720
+
+  // Calculate the rendered video area inside the element (object-fit: contain)
+  const videoAspect = srcW / srcH
+  const elemAspect  = elemW / elemH
+
+  let drawW, drawH, offsetX, offsetY
+  if (videoAspect > elemAspect) {
+    // Black bars top & bottom
+    drawW   = elemW
+    drawH   = elemW / videoAspect
+    offsetX = 0
+    offsetY = (elemH - drawH) / 2
+  } else {
+    // Black bars left & right
+    drawW   = elemH * videoAspect
+    drawH   = elemH
+    offsetX = (elemW - drawW) / 2
+    offsetY = 0
+  }
+
+  const scaleX = drawW / srcW
+  const scaleY = drawH / srcH
+
+  for (const det of detections) {
+    const [x1, y1, x2, y2] = det.bbox
+    const rx = offsetX + x1 * scaleX
+    const ry = offsetY + y1 * scaleY
+    const rw = (x2 - x1) * scaleX
+    const rh = (y2 - y1) * scaleY
+
+    const color = CLASS_COLORS[det.class_name] || '#ffffff'
+
+    // Bounding box
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.strokeRect(rx, ry, rw, rh)
+
+    // Label
+    const label = `${det.class_name} ${Math.round(det.confidence * 100)}%`
+    ctx.font = 'bold 11px sans-serif'
+    const textW = ctx.measureText(label).width + 8
+
+    ctx.globalAlpha = 0.8
+    ctx.fillStyle = color
+    ctx.fillRect(rx, ry - 20, textW, 20)
+    ctx.globalAlpha = 1
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(label, rx + 4, ry - 5)
+  }
+}
+
+export default function LiveFeed({ camera, connected, detections = [], frameSize }) {
+  const videoRef  = useRef(null)
+  const canvasRef = useRef(null)
+  const hlsRef    = useRef(null)
   const [videoReady, setVideoReady] = useState(false)
   const [videoError, setVideoError] = useState(false)
 
+  // ── HLS player ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!camera) return
-
     const video = videoRef.current
     if (!video) return
 
     setVideoReady(false)
     setVideoError(false)
 
-    // Destroy any previous hls instance
     if (hlsRef.current) {
       hlsRef.current.destroy()
       hlsRef.current = null
@@ -29,39 +108,29 @@ export default function LiveFeed({ camera, connected }) {
     if (Hls.isSupported()) {
       const hls = new Hls({
         lowLatencyMode: true,
-        backBufferLength: 0,       // don't keep old segments in memory
-        maxBufferLength: 8,        // keep at most 8s buffered ahead
+        backBufferLength: 0,
+        maxBufferLength: 8,
         maxMaxBufferLength: 15,
-        liveSyncDurationCount: 2,  // try to stay close to live edge
+        liveSyncDurationCount: 2,
         liveMaxLatencyDurationCount: 5,
       })
-
       hls.loadSource(streamUrl)
       hls.attachMedia(video)
-
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {})
         setVideoReady(true)
         setVideoError(false)
       })
-
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
           setVideoError(true)
-          // Fatal errors: try to recover once, then reload source
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hls.startLoad()
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            hls.recoverMediaError()
-          } else {
-            hls.loadSource(streamUrl)
-          }
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
+          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
+          else hls.loadSource(streamUrl)
         }
       })
-
       hlsRef.current = hls
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Safari native HLS
       video.src = streamUrl
       video.addEventListener('loadeddata', () => setVideoReady(true), { once: true })
       video.play().catch(() => {})
@@ -70,16 +139,23 @@ export default function LiveFeed({ camera, connected }) {
     }
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy()
-        hlsRef.current = null
-      }
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
     }
-  }, [camera?.id]) // re-init only when the camera changes
+  }, [camera?.id])
 
+  // ── Bounding box canvas ──────────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const video  = videoRef.current
+    if (!canvas || !video || !videoReady) return
+    drawDetections(canvas, video, detections, frameSize)
+  }, [detections, frameSize, videoReady])
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="relative bg-gray-900 rounded-xl overflow-hidden border border-gray-700 flex-shrink-0">
-      {/* Video element — always mounted so hls.js can attach */}
+
+      {/* Video */}
       <video
         ref={videoRef}
         autoPlay
@@ -88,7 +164,14 @@ export default function LiveFeed({ camera, connected }) {
         className={`w-full object-contain max-h-[460px] ${videoReady ? 'block' : 'hidden'}`}
       />
 
-      {/* Loading / error placeholder */}
+      {/* Bbox canvas — sits exactly over the video */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 pointer-events-none"
+        style={{ width: '100%', height: '100%' }}
+      />
+
+      {/* Loading / error state */}
       {!videoReady && (
         <div className="w-full h-72 flex items-center justify-center bg-gray-950">
           <div className="text-center">
@@ -129,7 +212,7 @@ export default function LiveFeed({ camera, connected }) {
         </div>
       )}
 
-      {/* Top-right: detection WS indicator */}
+      {/* Top-right: LIVE indicator */}
       <div className="absolute top-3 right-3">
         {connected ? (
           <div className="flex items-center gap-1.5 bg-black/70 px-2.5 py-1 rounded-full backdrop-blur-sm">
@@ -146,6 +229,18 @@ export default function LiveFeed({ camera, connected }) {
           </div>
         )}
       </div>
+
+      {/* Bottom-right: bbox color legend */}
+      {videoReady && detections.length > 0 && (
+        <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 flex flex-col gap-1">
+          {[...new Set(detections.map(d => d.class_name))].map(cls => (
+            <div key={cls} className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: CLASS_COLORS[cls] || '#fff' }} />
+              <span className="text-white text-xs">{cls}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

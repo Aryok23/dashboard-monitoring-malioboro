@@ -1,4 +1,3 @@
-import random
 import logging
 
 import numpy as np
@@ -17,50 +16,50 @@ TARGET_CLASSES = [
     "truck",
 ]
 
+# COCO class names → our class names
+# Classes not listed here are ignored by the detector
+_COCO_TO_OURS = {
+    "person":     "people",
+    "bicycle":    "bicycle",
+    "motorcycle": "motorcycle",
+    "car":        "car",
+    "bus":        "bus",
+    "truck":      "truck",
+    # bajaj, becak, andong are not in COCO — need fine-tuned weights
+}
+
 _model = None
 
 
-def load_model(model_path: str) -> None:
-    """Load YOLO model from path. Stub does nothing until real weights are provided."""
+def load_model(model_path: str = "yolov8n.pt") -> None:
+    """
+    Load a YOLO model.
+    Pass "yolov8n.pt" (or s/m/l/x) to use pretrained COCO weights —
+    ultralytics downloads the file automatically on first run.
+    Pass a custom "best.pt" path for fine-tuned weights.
+    """
     global _model
-    logger.info(f"Loading model from {model_path}")
-    # Uncomment when real weights are available:
-    # from ultralytics import YOLO
-    # _model = YOLO(model_path)
-    # logger.info("Model loaded successfully.")
+    from ultralytics import YOLO
+    logger.info("Loading YOLO model: %s", model_path)
+    _model = YOLO(model_path)
+    logger.info("YOLO model loaded. Detectable classes: %s", list(_COCO_TO_OURS.keys()))
 
 
 def detect(frame: np.ndarray) -> list[dict]:
     """
     Run detection on a frame.
-    Returns a list of dicts: {class_name, confidence, bbox: [x1,y1,x2,y2]}.
+    Returns list of dicts: {class_name, confidence, bbox: [x1,y1,x2,y2]}.
+    Falls back to empty list if model is not loaded.
     """
-    if _model is not None:
-        # Real inference path (uncomment when model is loaded):
-        # results = _model(frame, verbose=False)
-        # return _parse_yolo_results(results)
-        pass
+    if _model is None:
+        return []
 
-    # Stub: return realistic random detections for UI/DB testing
-    h, w = (frame.shape[:2] if frame is not None and frame.size > 0 else (480, 640))
-    num_detections = random.randint(2, 8)
-    detections = []
-
-    for _ in range(num_detections):
-        x1 = random.randint(0, max(0, w - 50))
-        y1 = random.randint(0, max(0, h - 50))
-        x2 = random.randint(x1 + 20, min(x1 + 200, w))
-        y2 = random.randint(y1 + 20, min(y1 + 200, h))
-
-        detections.append(
-            {
-                "class_name": random.choice(TARGET_CLASSES),
-                "confidence": round(random.uniform(0.60, 0.95), 2),
-                "bbox": [x1, y1, x2, y2],
-            }
-        )
-
-    return detections
+    try:
+        results = _model(frame, verbose=False)
+        return _parse_results(results)
+    except Exception as exc:
+        logger.warning("Inference error: %s", exc)
+        return []
 
 
 def get_counts(detections: list[dict]) -> dict:
@@ -73,25 +72,21 @@ def get_counts(detections: list[dict]) -> dict:
     return counts
 
 
-def _parse_yolo_results(results) -> list[dict]:
-    """Convert ultralytics Results to detection dicts. Used when real model is loaded."""
+def _parse_results(results) -> list[dict]:
+    """Convert ultralytics Results objects to our detection dict format."""
     detections = []
     for result in results:
-        boxes = result.boxes
-        if boxes is None:
+        if result.boxes is None:
             continue
-        for box in boxes:
-            class_id = int(box.cls[0])
-            class_name = result.names.get(class_id, "unknown")
-            if class_name not in TARGET_CLASSES:
-                continue
+        for box in result.boxes:
+            coco_name = result.names.get(int(box.cls[0]), "")
+            our_name = _COCO_TO_OURS.get(coco_name)
+            if our_name is None:
+                continue  # class not relevant to us
             x1, y1, x2, y2 = [int(v) for v in box.xyxy[0]]
-            conf = float(box.conf[0])
-            detections.append(
-                {
-                    "class_name": class_name,
-                    "confidence": round(conf, 2),
-                    "bbox": [x1, y1, x2, y2],
-                }
-            )
+            detections.append({
+                "class_name": our_name,
+                "confidence": round(float(box.conf[0]), 2),
+                "bbox": [x1, y1, x2, y2],
+            })
     return detections
