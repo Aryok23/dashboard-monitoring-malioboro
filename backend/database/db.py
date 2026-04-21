@@ -2,15 +2,13 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from sqlalchemy import and_, cast, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .models import Alert, Base, DetectionLog, User
 
 logger = logging.getLogger(__name__)
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 _engine = None
 _session_factory: async_sessionmaker | None = None
@@ -42,7 +40,8 @@ async def _seed_admin() -> None:
     async with _session_factory() as session:
         result = await session.execute(select(func.count(User.id)))
         if result.scalar() == 0:
-            user = User(username=username, hashed_password=pwd_context.hash(password))
+            hashed = _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+            user = User(username=username, hashed_password=hashed)
             session.add(user)
             await session.commit()
             logger.info(f"Admin user '{username}' seeded.")

@@ -1,16 +1,14 @@
 import os
 from datetime import datetime, timedelta
 
+import bcrypt as _bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 
 from ..database.db import get_session
 from ..database.models import User
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 _ALGORITHM = "HS256"
@@ -46,7 +44,7 @@ async def login(username: str, password: str) -> dict:
         result = await session.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(password, user.hashed_password):
+    if not user or not _bcrypt.checkpw(password.encode(), user.hashed_password.encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",

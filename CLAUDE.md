@@ -68,7 +68,7 @@ SQLite at `backend/data/malioboro.db`. Created automatically on startup. Admin u
 
 ## Important notes
 
-- **bcrypt must stay at 4.0.1** — newer versions break passlib's bcrypt backend on this setup
+- **bcrypt must stay at 4.0.1** — passlib was removed; auth uses `bcrypt` directly. bcrypt 4.0.0+ rejects passwords >72 bytes, which broke passlib's internal test vector
 - **`__init__.py` files are required** in all backend subpackages — relative imports depend on them
 - The `_on_active_frame` callback is called from a background thread — always use `loop.call_soon_threadsafe` or `asyncio.run_coroutine_threadsafe` to interact with the event loop from it
 - Alert cooldown is 5 minutes per (camera_id, alert_type) pair to prevent spam
