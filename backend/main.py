@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -156,11 +157,21 @@ async def lifespan(app: FastAPI):
         vehicle_threshold=v_thresh,
     )
     _camera_manager.start(default_camera_id=1)
-    asyncio.create_task(_periodic_log_writer())
+    _log_task = asyncio.create_task(_periodic_log_writer())
 
     yield
 
+    _log_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _log_task
+
     _camera_manager.stop()
+
+    # Skip Python's OpenCV/FFmpeg finalizers — they block for 30 s waiting for
+    # cap.read() daemon threads to time out.  All real cleanup (DB writes,
+    # camera stop) is already done above, so a hard exit is safe here.
+    logging.shutdown()
+    os._exit(0)
 
 
 # ---------------------------------------------------------------------------
@@ -298,15 +309,43 @@ async def ws_active(websocket: WebSocket):
     await websocket.accept()
     q: asyncio.Queue = asyncio.Queue(maxsize=10)
     _ws_queues.append(q)
+    # One persistent receive task — completes when uvicorn sends a disconnect
+    # during shutdown (connection.shutdown() puts a disconnect msg in the ASGI
+    # receive queue).  Without this, the handler never sees the signal and
+    # uvicorn blocks forever at "Waiting for connections to close."
+    recv_task = asyncio.create_task(websocket.receive())
+    get_task: asyncio.Task | None = None
     try:
         while True:
-            payload = await asyncio.wait_for(q.get(), timeout=60)
-            await websocket.send_text(json.dumps(payload))
-    except (WebSocketDisconnect, asyncio.TimeoutError):
+            get_task = asyncio.create_task(q.get())
+            done, _ = await asyncio.wait(
+                {get_task, recv_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if recv_task in done:
+                get_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await get_task
+                break
+            payload = get_task.result()
+            if payload is None:  # shutdown sentinel
+                break
+            try:
+                await websocket.send_text(json.dumps(payload))
+            except Exception:
+                break
+    except WebSocketDisconnect:
         pass
     except Exception as exc:
         logger.debug("WebSocket error: %s", exc)
     finally:
+        if get_task is not None and not get_task.done():
+            get_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await get_task
+        recv_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await recv_task
         if q in _ws_queues:
             _ws_queues.remove(q)
 

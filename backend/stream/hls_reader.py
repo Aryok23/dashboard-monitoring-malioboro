@@ -1,14 +1,13 @@
 import logging
 import os
+import queue
 import threading
 import time
 from urllib.parse import urljoin
 
 import cv2
-import numpy as np
 import requests
 
-# Tell OpenCV's FFMPEG backend to send a browser User-Agent on HLS requests
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
     "user_agent;Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -23,12 +22,42 @@ _INITIAL_BACKOFF = 5
 _MAX_BACKOFF = 60
 
 
+def _capture_worker(
+    cap: cv2.VideoCapture,
+    frame_q: queue.Queue,
+    stop_event: threading.Event,
+) -> None:
+    """
+    Daemon thread: calls cap.read() in a tight loop and pushes frames into
+    frame_q.  Uses stop_event so the consumer can signal early exit without
+    waiting for the 30-second OpenCV/FFmpeg timeout.
+    """
+    try:
+        while not stop_event.is_set():
+            ret, frame = cap.read()
+            item = frame if (ret and frame is not None) else None
+            # Non-blocking put with back-pressure: if the queue is full the
+            # consumer is slow/stopped — retry until it drains or we're told
+            # to stop.
+            while not stop_event.is_set():
+                try:
+                    frame_q.put(item, timeout=0.5)
+                    break
+                except queue.Full:
+                    continue
+    finally:
+        cap.release()
+
+
 class HLSStreamReader:
     """
     Reads frames from an HLS stream.
 
     Always resolves the live chunklist from master.m3u8 so it survives
     Wowza token rotations.  Reconnects with exponential back-off on drop.
+
+    cap.read() is moved into a daemon thread so stop() returns immediately
+    instead of waiting up to 30 s for the OpenCV/FFmpeg timeout.
     """
 
     def __init__(self, master_url: str, fps_limit: float = 1.0):
@@ -41,7 +70,7 @@ class HLSStreamReader:
     # ------------------------------------------------------------------
 
     def stream_frames(self):
-        """Generator that yields numpy BGR frames indefinitely until stop() is called."""
+        """Generator that yields numpy BGR frames until stop() is called."""
         backoff = _INITIAL_BACKOFF
 
         while not self._stop_event.is_set():
@@ -56,7 +85,7 @@ class HLSStreamReader:
                 backoff = min(backoff * 2, _MAX_BACKOFF)
                 continue
 
-            backoff = _INITIAL_BACKOFF  # reset on successful resolution
+            backoff = _INITIAL_BACKOFF
 
             cap = cv2.VideoCapture(chunklist_url)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -74,22 +103,37 @@ class HLSStreamReader:
 
             logger.info("Stream opened: %s (fps_limit=%.1f)", self.master_url, self.fps_limit)
 
+            # Per-connection stop event so we can tear down this specific
+            # capture worker without affecting the outer reconnect loop.
+            conn_stop = threading.Event()
+            frame_q: queue.Queue = queue.Queue(maxsize=2)
+            worker = threading.Thread(
+                target=_capture_worker,
+                args=(cap, frame_q, conn_stop),
+                daemon=True,
+            )
+            worker.start()
+
             frame_interval = 1.0 / self.fps_limit
             last_yield = 0.0
             consecutive_failures = 0
+            reconnect = False
 
             while not self._stop_event.is_set():
-                ret, frame = cap.read()
+                try:
+                    frame = frame_q.get(timeout=1.0)
+                except queue.Empty:
+                    continue
 
-                if not ret or frame is None:
+                if frame is None:
                     consecutive_failures += 1
                     if consecutive_failures >= 5:
                         logger.warning(
                             "5 consecutive read failures on %s — reconnecting",
                             self.master_url,
                         )
+                        reconnect = True
                         break
-                    time.sleep(0.2)
                     continue
 
                 consecutive_failures = 0
@@ -97,12 +141,22 @@ class HLSStreamReader:
                 now = time.monotonic()
                 elapsed = now - last_yield
                 if elapsed < frame_interval:
-                    time.sleep(frame_interval - elapsed)
+                    self._sleep(frame_interval - elapsed)
+
+                if self._stop_event.is_set():
+                    break
 
                 last_yield = time.monotonic()
                 yield frame
 
-            cap.release()
+            # Tear down this connection's worker.  It's a daemon thread so it
+            # will be killed on process exit even if cap.read() is still blocking.
+            conn_stop.set()
+            worker.join(timeout=2)
+
+            if not reconnect:
+                # stop() was called externally — exit the outer loop.
+                break
 
             if not self._stop_event.is_set():
                 logger.info(
@@ -114,7 +168,7 @@ class HLSStreamReader:
                 backoff = min(backoff * 2, _MAX_BACKOFF)
 
     def stop(self) -> None:
-        """Signal the reader to stop after the current frame."""
+        """Signal the reader to stop. Returns immediately."""
         self._stop_event.set()
 
     # ------------------------------------------------------------------
@@ -134,7 +188,6 @@ class HLSStreamReader:
                 if line and not line.startswith("#"):
                     if line.startswith("http"):
                         return line
-                    # Relative URL — resolve against master_url base
                     return urljoin(self.master_url, line)
         except Exception as exc:
             logger.debug("Failed to fetch master playlist %s: %s", self.master_url, exc)

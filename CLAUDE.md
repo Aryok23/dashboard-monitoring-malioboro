@@ -16,8 +16,8 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r backend/requirements.txt   # includes bcrypt==4.0.1 — do not upgrade bcrypt
 
-# Run
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+# Run (--timeout-graceful-shutdown required for clean Ctrl+C exit)
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 5
 
 # Reset database (re-seeds admin from .env)
 del backend\data\malioboro.db

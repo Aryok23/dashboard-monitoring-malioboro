@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from collections import deque
 from typing import Callable
 
@@ -12,7 +13,7 @@ _VEHICLE_CLASSES = {"motorcycle", "car", "bus", "truck", "bajaj", "becak", "ando
 
 
 class _ActiveCameraProcessor:
-    """Dedicated thread that processes the active camera at 12 FPS."""
+    """Dedicated thread that processes the active camera at 3 FPS."""
 
     def __init__(self, camera: dict, on_active_frame: Callable):
         self._camera = camera
@@ -30,7 +31,9 @@ class _ActiveCameraProcessor:
         self._running = False
         self._reader.stop()
         if self._thread:
-            self._thread.join(timeout=10)
+            # Reader's capture worker is a daemon thread — join will return
+            # quickly now that stop_event is set and the generator can exit.
+            self._thread.join(timeout=5)
 
     @property
     def camera_id(self) -> int:
@@ -72,6 +75,8 @@ class _BackgroundPollingPool:
         self._queue: deque[int] = deque()
         self._thread: threading.Thread | None = None
         self._running = False
+        self._stop_event = threading.Event()
+        self._current_poll_reader: HLSStreamReader | None = None
 
     def set_active_camera(self, camera_id: int) -> None:
         self._active_camera_id = camera_id
@@ -80,13 +85,18 @@ class _BackgroundPollingPool:
 
     def start(self) -> None:
         self._running = True
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="bg-pool")
         self._thread.start()
 
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
+        # Cancel any in-progress poll so its cap.read() doesn't hold up shutdown.
+        if self._current_poll_reader:
+            self._current_poll_reader.stop()
         if self._thread:
-            self._thread.join(timeout=10)
+            self._thread.join(timeout=5)
 
     def _camera_by_id(self, camera_id: int) -> dict | None:
         return next((c for c in self._cameras if c["id"] == camera_id), None)
@@ -94,14 +104,12 @@ class _BackgroundPollingPool:
     def _run(self) -> None:
         while self._running:
             if not self._queue:
-                import time
-                time.sleep(1)
+                self._stop_event.wait(1.0)
                 continue
 
             camera_id = self._queue.popleft()
 
             if camera_id == self._active_camera_id:
-                # Was just made active — skip this slot
                 continue
 
             camera = self._camera_by_id(camera_id)
@@ -110,16 +118,17 @@ class _BackgroundPollingPool:
 
             self._poll_one(camera)
 
-            # Re-enqueue for the next round
+            if not self._running:
+                break
+
             self._queue.append(camera_id)
 
-            # Spread the load: aim for each camera to be polled every ~60 s
             n = max(len(self._queue), 1)
-            import time
-            time.sleep(max(1.0, 60.0 / n))
+            self._stop_event.wait(max(1.0, 60.0 / n))
 
     def _poll_one(self, camera: dict) -> None:
         reader = HLSStreamReader(camera["master_url"], fps_limit=1.0)
+        self._current_poll_reader = reader
         frame = None
         try:
             for f in reader.stream_frames():
@@ -130,6 +139,8 @@ class _BackgroundPollingPool:
             logger.debug("Background poll failed for camera %d: %s", camera["id"], exc)
             reader.stop()
             return
+        finally:
+            self._current_poll_reader = None
 
         if frame is None:
             return

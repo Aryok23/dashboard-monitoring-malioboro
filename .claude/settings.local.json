@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(pip show *)",
-      "Bash(python -m pip show bcrypt)"
+      "Bash(python -m pip show bcrypt)",
+      "Bash(python *)"
     ]
   }
 }
