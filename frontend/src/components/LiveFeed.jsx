@@ -1,4 +1,3 @@
-import Hls from 'hls.js'
 import { useEffect, useRef, useState } from 'react'
 
 const BACKEND = 'http://localhost:8000'
@@ -15,12 +14,12 @@ const CLASS_COLORS = {
   andong:     '#06b6d4',
 }
 
-function drawDetections(canvas, video, detections, frameSize) {
+function drawDetections(canvas, el, detections, frameSize) {
   const ctx = canvas.getContext('2d')
 
-  // Match canvas pixel size to the video element's displayed size
-  const elemW = video.clientWidth
-  const elemH = video.clientHeight
+  // Match canvas pixel size to the img element's displayed size
+  const elemW = el.clientWidth
+  const elemH = el.clientHeight
   canvas.width = elemW
   canvas.height = elemH
   ctx.clearRect(0, 0, elemW, elemH)
@@ -28,8 +27,8 @@ function drawDetections(canvas, video, detections, frameSize) {
   if (!detections || detections.length === 0) return
 
   // Original frame dimensions used for inference
-  const srcW = frameSize?.width  || video.videoWidth  || 1280
-  const srcH = frameSize?.height || video.videoHeight || 720
+  const srcW = frameSize?.width  || 1280
+  const srcH = frameSize?.height || 720
 
   // Calculate the rendered video area inside the element (object-fit: contain)
   const videoAspect = srcW / srcH
@@ -83,85 +82,37 @@ function drawDetections(canvas, video, detections, frameSize) {
 }
 
 export default function LiveFeed({ camera, connected, detections = [], frameSize }) {
-  const videoRef  = useRef(null)
+  const imgRef    = useRef(null)
   const canvasRef = useRef(null)
-  const hlsRef    = useRef(null)
   const [videoReady, setVideoReady] = useState(false)
   const [videoError, setVideoError] = useState(false)
 
-  // ── HLS player ──────────────────────────────────────────────────────────
+  // ── Reset ready state on camera switch ──────────────────────────────────
   useEffect(() => {
-    if (!camera) return
-    const video = videoRef.current
-    if (!video) return
-
     setVideoReady(false)
     setVideoError(false)
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy()
-      hlsRef.current = null
-    }
-
-    const streamUrl = `${BACKEND}/proxy/hls/${camera.id}/master.m3u8`
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        lowLatencyMode: true,
-        backBufferLength: 0,
-        maxBufferLength: 8,
-        maxMaxBufferLength: 15,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 5,
-      })
-      hls.loadSource(streamUrl)
-      hls.attachMedia(video)
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {})
-        setVideoReady(true)
-        setVideoError(false)
-      })
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          setVideoError(true)
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad()
-          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError()
-          else hls.loadSource(streamUrl)
-        }
-      })
-      hlsRef.current = hls
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = streamUrl
-      video.addEventListener('loadeddata', () => setVideoReady(true), { once: true })
-      video.play().catch(() => {})
-    } else {
-      setVideoError(true)
-    }
-
-    return () => {
-      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null }
-    }
   }, [camera?.id])
 
   // ── Bounding box canvas ──────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current
-    const video  = videoRef.current
-    if (!canvas || !video || !videoReady) return
-    drawDetections(canvas, video, detections, frameSize)
+    const img    = imgRef.current
+    if (!canvas || !img || !videoReady) return
+    drawDetections(canvas, img, detections, frameSize)
   }, [detections, frameSize, videoReady])
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="relative bg-gray-900 rounded-xl overflow-hidden border border-gray-700 flex-shrink-0">
 
-      {/* Video */}
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
+      {/* MJPEG feed */}
+      <img
+        ref={imgRef}
+        src={camera ? `${BACKEND}/stream/mjpeg/${camera.id}` : undefined}
+        alt=""
         className={`w-full object-contain max-h-[460px] ${videoReady ? 'block' : 'hidden'}`}
+        onLoad={() => { setVideoReady(true); setVideoError(false) }}
+        onError={() => setVideoError(true)}
       />
 
       {/* Bbox canvas — sits exactly over the video */}
