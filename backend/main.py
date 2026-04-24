@@ -19,7 +19,7 @@ load_dotenv()
 from .auth.auth_handler import get_current_user, login
 from .database import db as database
 from .inference.detector import get_counts, load_model
-from .stream.camera_manager import CameraManager
+from .stream.camera_manager import CameraManager, _latest_jpegs, _latest_jpegs_lock
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -261,6 +261,35 @@ async def proxy_hls_segment(camera_id: int, filename: str):
         content=resp.content,
         media_type=content_type,
         headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# MJPEG stream — no auth required (img tag fetches directly)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/stream/mjpeg/{camera_id}")
+async def stream_mjpeg(camera_id: int):
+    if camera_id not in _CAMERA_MAP:
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
+
+    async def generator():
+        while True:
+            with _latest_jpegs_lock:
+                frame_bytes = _latest_jpegs.get(camera_id)
+            if frame_bytes:
+                yield (
+                    b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                    + frame_bytes
+                    + b"\r\n"
+                )
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(
+        generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"},
     )
 
 
