@@ -9,3 +9,4 @@ data/
 .venv/
 venv/
 debug_frames/
+dataset/
