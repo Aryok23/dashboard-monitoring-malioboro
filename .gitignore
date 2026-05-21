@@ -10,3 +10,5 @@ data/
 venv/
 debug_frames/
 dataset/
+*.pt
+*.pth
