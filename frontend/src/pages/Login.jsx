@@ -99,7 +99,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-gray-600 text-xs mt-6">
-          Universitas — Skripsi Pemantauan Kawasan Malioboro
+          Universitas Gadjah Mada — Skripsi Pemantauan Kawasan Malioboro
         </p>
       </div>
     </div>
