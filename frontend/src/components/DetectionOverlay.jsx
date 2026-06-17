@@ -1,13 +1,13 @@
 const CLASS_META = {
-  people:     { icon: '🚶', label: 'Pejalan Kaki' },
-  bicycle:    { icon: '🚲', label: 'Sepeda' },
-  motorcycle: { icon: '🛵', label: 'Motor' },
-  bajaj:      { icon: '🛺', label: 'Bajaj' },
-  becak:      { icon: '🚡', label: 'Becak' },
-  andong:     { icon: '🐴', label: 'Andong' },
-  car:        { icon: '🚗', label: 'Mobil' },
-  bus:        { icon: '🚌', label: 'Bus' },
-  truck:      { icon: '🚛', label: 'Truk' },
+  orang:   { icon: '🚶', label: 'Pejalan Kaki' },
+  sepeda:  { icon: '🚲', label: 'Sepeda' },
+  motor:   { icon: '🛵', label: 'Motor' },
+  mobil:   { icon: '🚗', label: 'Mobil' },
+  bus:     { icon: '🚌', label: 'Bus' },
+  truk:    { icon: '🚛', label: 'Truk' },
+  bajaj:   { icon: '🛺', label: 'Bajaj' },
+  becak:   { icon: '🚡', label: 'Becak' },
+  andong:  { icon: '🐴', label: 'Andong' },
 }
 
 function cardColor(count) {

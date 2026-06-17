@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts'
 
-const API = 'http://localhost:8000'
+const API = import.meta.env.VITE_API_URL
 const TABS = [
   { key: 'today', label: 'Hari Ini' },
   { key: '7days', label: '7 Hari' },

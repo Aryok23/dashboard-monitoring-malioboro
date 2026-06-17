@@ -16,7 +16,10 @@ _EXPIRY_HOURS = 8
 
 
 def _secret() -> str:
-    return os.getenv("JWT_SECRET", "fallback-dev-secret-change-in-production")
+    secret = os.getenv("JWT_SECRET")
+    if not secret:
+        raise RuntimeError("JWT_SECRET is not set in environment / .env")
+    return secret
 
 
 def create_token(user_id: int, username: str) -> str:

@@ -140,9 +140,7 @@ async def lifespan(app: FastAPI):
     _loop = asyncio.get_event_loop()
     await database.init_db()
 
-    # Load pretrained YOLOv8n — downloads automatically on first run (~6 MB)
-    # Replace "yolov8n.pt" with your fine-tuned "best.pt" path when ready
-    yolo_model = os.getenv("YOLO_MODEL", "yolov8n.pt")
+    yolo_model = os.getenv("YOLO_MODEL", "yolo11lbest.pt")
     load_model(yolo_model)
 
     p_thresh = int(os.getenv("ALERT_PEOPLE_THRESHOLD", "50"))

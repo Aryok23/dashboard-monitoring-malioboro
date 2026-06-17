@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND = 'http://localhost:8000'
+const BACKEND = import.meta.env.VITE_API_URL
 
 const CLASS_COLORS = {
-  people:     '#3b82f6',   // blue
-  bicycle:    '#22c55e',   // green
-  motorcycle: '#eab308',   // yellow
-  car:        '#f97316',   // orange
-  bus:        '#ef4444',   // red
-  truck:      '#a855f7',   // purple
-  bajaj:      '#06b6d4',   // cyan
-  becak:      '#06b6d4',
-  andong:     '#06b6d4',
+  orang:   '#3b82f6',   // blue
+  sepeda:  '#22c55e',   // green
+  motor:   '#eab308',   // yellow
+  mobil:   '#f97316',   // orange
+  bus:     '#ef4444',   // red
+  truk:    '#a855f7',   // purple
+  bajaj:   '#06b6d4',   // cyan
+  becak:   '#ec4899',   // pink
+  andong:  '#84cc16',   // lime
 }
 
 function drawDetections(canvas, el, detections, frameSize) {
@@ -94,11 +94,16 @@ export default function LiveFeed({ camera, connected, detections = [], frameSize
   }, [camera?.id])
 
   // ── Bounding box canvas ──────────────────────────────────────────────────
+  // Delay 100 ms so the MJPEG frame (larger payload) has time to arrive and
+  // decode before bboxes are drawn, preventing the "bbox ahead of frame" flicker.
   useEffect(() => {
     const canvas = canvasRef.current
     const img    = imgRef.current
     if (!canvas || !img || !videoReady) return
-    drawDetections(canvas, img, detections, frameSize)
+    const timer = setTimeout(() => {
+      drawDetections(canvas, img, detections, frameSize)
+    }, 100)
+    return () => clearTimeout(timer)
   }, [detections, frameSize, videoReady])
 
   // ── Render ───────────────────────────────────────────────────────────────

@@ -7,8 +7,8 @@ import CrowdChart from '../components/CrowdChart'
 import DetectionOverlay from '../components/DetectionOverlay'
 import LiveFeed from '../components/LiveFeed'
 
-const API = 'http://localhost:8000'
-const WS_URL = 'ws://localhost:8000/ws/active'
+const API = import.meta.env.VITE_API_URL
+const WS_URL = import.meta.env.VITE_WS_URL
 
 function authHeaders() {
   return { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
