@@ -31,6 +31,8 @@ class DetectionLog(Base):
     bus_count = Column(Integer, default=0)
     truck_count = Column(Integer, default=0)
     total_count = Column(Integer, default=0)
+    peak_count = Column(Integer, default=0)
+    people_peak = Column(Integer, default=0)
 
 
 class Alert(Base):
@@ -42,3 +44,6 @@ class Alert(Base):
     alert_type = Column(String, nullable=False)  # 'HIGH_CROWD' or 'HIGH_TRAFFIC'
     description = Column(Text)
     is_read = Column(Boolean, default=False)
+    trigger_value = Column(Integer, default=0)
+    image_path = Column(String, nullable=True)
+    detections = Column(Text, nullable=True)  # JSON-encoded list of {class_name, bbox, confidence}

@@ -11,7 +11,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 load_dotenv()
@@ -19,7 +19,12 @@ load_dotenv()
 from .auth.auth_handler import get_current_user, login
 from .database import db as database
 from .inference.detector import get_counts, load_model
-from .stream.camera_manager import CameraManager, _latest_jpegs, _latest_jpegs_lock
+from .stream.camera_manager import (
+    CameraManager,
+    _latest_jpegs,
+    _latest_jpegs_lock,
+    evaluate_threshold_alerts,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -36,6 +41,15 @@ _CAMERA_MAP: dict[int, dict] = {c["id"]: c for c in CAMERAS}
 _HLS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
+
+# ---------------------------------------------------------------------------
+# Alert image storage
+# ---------------------------------------------------------------------------
+
+_ALERTS_DIR = os.path.join(os.path.dirname(__file__), "storage", "alerts")
+os.makedirs(_ALERTS_DIR, exist_ok=True)
+_ALERT_RETENTION_DAYS = int(os.environ.get("ALERT_RETENTION_DAYS", "30"))
+_ALERT_CLEANUP_INTERVAL_SECS = 6 * 3600
 
 # ---------------------------------------------------------------------------
 # Shared state
@@ -76,17 +90,12 @@ def _on_active_frame(camera_id: int, frame, detections: list) -> None:
 
     _detection_buffer.setdefault(camera_id, []).append(counts)
 
-    p_thresh = int(os.getenv("ALERT_PEOPLE_THRESHOLD", "50"))
-    v_thresh = int(os.getenv("ALERT_VEHICLE_THRESHOLD", "30"))
-    people = counts.get("people", 0)
-    vehicles = sum(
-        counts.get(k, 0)
-        for k in ("motorcycle", "car", "bus", "truck", "bajaj", "becak", "andong", "bicycle")
-    )
-    if people > p_thresh:
-        _maybe_save_alert(camera_id, "HIGH_CROWD", f"People count {people} exceeded threshold {p_thresh}")
-    if vehicles > v_thresh:
-        _maybe_save_alert(camera_id, "HIGH_TRAFFIC", f"Vehicle count {vehicles} exceeded threshold {v_thresh}")
+    camera = _CAMERA_MAP.get(camera_id, {})
+    for alert_type, description in evaluate_threshold_alerts(camera, counts):
+        _maybe_save_alert(
+            camera_id, alert_type, description,
+            frame=frame, detections=detections, trigger_value=_trigger_value(alert_type, counts),
+        )
 
 
 def _on_background_detection(camera_id: int, detections: list) -> None:
@@ -94,20 +103,64 @@ def _on_background_detection(camera_id: int, detections: list) -> None:
     _detection_buffer.setdefault(camera_id, []).append(counts)
 
 
-def _on_background_alert(camera_id: int, alert_type: str) -> None:
+def _on_background_alert(
+    camera_id: int, alert_type: str, description: str, frame, detections: list, counts: dict
+) -> None:
     camera_name = _CAMERA_MAP.get(camera_id, {}).get("name", f"Camera {camera_id}")
-    _maybe_save_alert(camera_id, alert_type, f"Background alert from {camera_name}")
+    _maybe_save_alert(
+        camera_id, alert_type, description or f"Background alert from {camera_name}",
+        frame=frame, detections=detections, trigger_value=_trigger_value(alert_type, counts),
+    )
 
 
-def _maybe_save_alert(camera_id: int, alert_type: str, description: str) -> None:
+def _trigger_value(alert_type: str, counts: dict) -> int:
+    """HIGH_CROWD -> pedestrian count; HIGH_TRAFFIC -> all non-pedestrian
+    classes summed. `counts` keys are the Indonesian class names from
+    detector.get_counts() — "orang" is people."""
+    if alert_type == "HIGH_CROWD":
+        return counts.get("orang", 0)
+    return sum(v for k, v in counts.items() if k != "orang")
+
+
+def _save_alert_image(camera_id: int, frame) -> Optional[str]:
+    """Encode the raw (unannotated) frame as JPEG and write it to
+    _ALERTS_DIR. Bboxes are drawn client-side from the `detections` JSON at
+    render time, so only one image file is kept per alert. Returns just the
+    filename (no directory component) for storage in Alert.image_path."""
+    if frame is None:
+        return None
+    import cv2
+
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+        return None
+    filename = f"cam{camera_id}_{datetime.utcnow().strftime('%Y%m%dT%H%M%S%f')}.jpg"
+    with open(os.path.join(_ALERTS_DIR, filename), "wb") as f:
+        f.write(buf.tobytes())
+    return filename
+
+
+def _maybe_save_alert(
+    camera_id: int,
+    alert_type: str,
+    description: str,
+    frame=None,
+    detections: Optional[list] = None,
+    trigger_value: int = 0,
+) -> None:
     key = (camera_id, alert_type)
     now = datetime.utcnow()
     last = _last_alert.get(key)
     if last and (now - last).total_seconds() < _ALERT_COOLDOWN_SECS:
         return
     _last_alert[key] = now
+    image_path = _save_alert_image(camera_id, frame)
     asyncio.run_coroutine_threadsafe(
-        database.save_alert(camera_id, alert_type, description), _loop
+        database.save_alert(
+            camera_id, alert_type, description,
+            trigger_value=trigger_value, image_path=image_path, detections=detections,
+        ),
+        _loop,
     )
 
 
@@ -123,9 +176,33 @@ async def _periodic_log_writer() -> None:
             if not buf:
                 continue
             keys = buf[0].keys()
-            avg = {k: sum(d.get(k, 0) for d in buf) // len(buf) for k in keys}
-            await database.save_detection_log(camera_id, avg)
+            avg = {k: round(sum(d.get(k, 0) for d in buf) / len(buf)) for k in keys}
+            peak = max(sum(d.values()) for d in buf)
+            # Buffer dicts are keyed by the Indonesian class names from
+            # detector.get_counts() (TARGET_CLASSES) — "orang" is people.
+            people_peak = max(d.get("orang", 0) for d in buf)
+            await database.save_detection_log(
+                camera_id, avg, peak_count=peak, people_peak=people_peak
+            )
             _detection_buffer[camera_id] = []
+
+
+async def _periodic_alert_cleanup() -> None:
+    """Bounds backend/storage/alerts/ growth: delete alert rows (and their
+    image files) older than _ALERT_RETENTION_DAYS. Runs a few times a day —
+    retention is measured in days, no need to poll faster."""
+    while True:
+        await asyncio.sleep(_ALERT_CLEANUP_INTERVAL_SECS)
+        try:
+            deleted_images = await database.cleanup_old_alerts(_ALERT_RETENTION_DAYS)
+            for filename in deleted_images:
+                path = os.path.join(_ALERTS_DIR, os.path.basename(filename))
+                if os.path.isfile(path):
+                    os.remove(path)
+            if deleted_images:
+                logger.info("Alert cleanup: removed %d old alert(s).", len(deleted_images))
+        except Exception:
+            logger.exception("Alert cleanup failed")
 
 
 # ---------------------------------------------------------------------------
@@ -140,28 +217,27 @@ async def lifespan(app: FastAPI):
     _loop = asyncio.get_event_loop()
     await database.init_db()
 
-    yolo_model = os.getenv("YOLO_MODEL", "yolo11lbest.pt")
+    yolo_model = os.getenv("YOLO_MODEL", "yolo11lbest_finetuned.pt")
     load_model(yolo_model)
-
-    p_thresh = int(os.getenv("ALERT_PEOPLE_THRESHOLD", "50"))
-    v_thresh = int(os.getenv("ALERT_VEHICLE_THRESHOLD", "30"))
 
     _camera_manager = CameraManager(
         CAMERAS,
         _on_active_frame,
         _on_background_detection,
         _on_background_alert,
-        people_threshold=p_thresh,
-        vehicle_threshold=v_thresh,
     )
     _camera_manager.start(default_camera_id=1)
     _log_task = asyncio.create_task(_periodic_log_writer())
+    _cleanup_task = asyncio.create_task(_periodic_alert_cleanup())
 
     yield
 
     _log_task.cancel()
+    _cleanup_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _log_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _cleanup_task
 
     _camera_manager.stop()
 
@@ -388,13 +464,15 @@ async def detections_history(camera_id: int, date: str, current_user: dict = Dep
 
 
 @app.get("/detections/summary")
-async def detections_summary(camera_id: int, range: int = 7, current_user: dict = Depends(get_current_user)):
-    return await database.get_summary(camera_id, range)
+async def detections_summary(camera_id: int, days: int = 7, current_user: dict = Depends(get_current_user)):
+    """Per-WIB-calendar-day avg/peak total_count for the last `days` days."""
+    return await database.get_weekly_trend(camera_id, days)
 
 
-@app.get("/detections/heatmap")
-async def detections_heatmap(date: str, current_user: dict = Depends(get_current_user)):
-    return await database.get_heatmap(date)
+@app.get("/detections/hourly")
+async def detections_hourly(camera_id: int, date: str, current_user: dict = Depends(get_current_user)):
+    """Per-WIB-hour avg/peak total_count for one camera on one WIB calendar date."""
+    return await database.get_hourly_trend(camera_id, date)
 
 
 # ---------------------------------------------------------------------------
@@ -403,12 +481,55 @@ async def detections_heatmap(date: str, current_user: dict = Depends(get_current
 
 
 @app.get("/alerts")
-async def get_alerts(limit: int = 50, current_user: dict = Depends(get_current_user)):
-    alerts = await database.get_unread_alerts(limit)
+async def list_alerts(
+    camera_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    unread_only: bool = True,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    """Defaults (unread_only=True, no filters) match the original
+    notification-bell behaviour exactly. The "Riwayat Peringatan Keramaian"
+    history page calls this with unread_only=false plus camera_id/date
+    filters and offset-based pagination."""
+    alerts = await database.get_alerts(
+        camera_id=camera_id,
+        start_date=start_date,
+        end_date=end_date,
+        unread_only=unread_only,
+        limit=limit,
+        offset=offset,
+    )
     for alert in alerts:
         camera = _CAMERA_MAP.get(alert["camera_id"], {})
         alert["camera_name"] = camera.get("name", f"Camera {alert['camera_id']}")
     return alerts
+
+
+@app.get("/alerts/{alert_id}")
+async def get_alert_detail(alert_id: int, current_user: dict = Depends(get_current_user)):
+    alert = await database.get_alert_by_id(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    camera = _CAMERA_MAP.get(alert["camera_id"], {})
+    alert["camera_name"] = camera.get("name", f"Camera {alert['camera_id']}")
+    return alert
+
+
+@app.get("/alerts/{alert_id}/image")
+async def get_alert_image(alert_id: int, current_user: dict = Depends(get_current_user)):
+    alert = await database.get_alert_by_id(alert_id)
+    if not alert or not alert["image_path"]:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # basename() strips any path components, so a tampered image_path can
+    # only ever resolve to a file directly inside _ALERTS_DIR.
+    filename = os.path.basename(alert["image_path"])
+    full_path = os.path.join(_ALERTS_DIR, filename)
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="Image file not found")
+    return FileResponse(full_path, media_type="image/jpeg")
 
 
 @app.post("/alerts/{alert_id}/read")

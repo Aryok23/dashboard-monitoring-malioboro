@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import AlertsPanel from '../components/AlertsPanel'
 import CameraSelector from '../components/CameraSelector'
 import CrowdChart from '../components/CrowdChart'
@@ -115,12 +115,20 @@ export default function Dashboard() {
           </div>
           <span className="font-semibold text-white">Malioboro Monitor</span>
         </div>
-        <button
-          onClick={handleLogout}
-          className="text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors"
-        >
-          Keluar
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/alerts/history"
+            className="text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Riwayat Peringatan
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            Keluar
+          </button>
+        </div>
       </header>
 
       {/* Body */}

@@ -3,7 +3,13 @@
     "allow": [
       "Bash(pip show *)",
       "Bash(python -m pip show bcrypt)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(tasklist)",
+      "Bash(wmic process *)",
+      "Bash(powershell -Command \"Get-Process -Id 29248 | Select-Object Id,ProcessName,Path\")",
+      "Bash(taskkill *)",
+      "Bash(npx vite *)",
+      "Bash(node -e \"const c=require\\('./backend/config/cameras.json'\\); console.log\\(c.length\\); console.log\\(c.slice\\(0,3\\)\\)\")"
     ]
   }
 }

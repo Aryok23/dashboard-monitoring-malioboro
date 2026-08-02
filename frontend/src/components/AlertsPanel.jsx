@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useEffect, useState } from 'react'
+import { formatWib } from '../utils/wib'
 
 const API = import.meta.env.VITE_API_URL
 
@@ -20,17 +21,6 @@ function AlertBadge({ type }) {
       LALU LINTAS
     </span>
   )
-}
-
-function formatTime(iso) {
-  try {
-    return new Date(iso).toLocaleString('id-ID', {
-      day: '2-digit', month: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
 }
 
 export default function AlertsPanel() {
@@ -95,7 +85,7 @@ export default function AlertsPanel() {
                   <p className="text-xs font-semibold text-white truncate">
                     {alert.camera_name || `Kamera ${alert.camera_id}`}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">{formatTime(alert.timestamp)}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{formatWib(alert.timestamp)} WIB</p>
                   {alert.description && (
                     <p className="text-xs text-gray-400 mt-1 line-clamp-2">{alert.description}</p>
                   )}

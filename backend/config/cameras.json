@@ -5,7 +5,8 @@
     "stream_key": "Malioboro_1_Selatan_Teteg.stream",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_1_Selatan_Teteg.stream/master.m3u8",
     "zone": "Selatan",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 2,
@@ -13,7 +14,8 @@
     "stream_key": "Malioboro_2_Depan_Toko_Subur",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_2_Depan_Toko_Subur.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 3,
@@ -21,7 +23,8 @@
     "stream_key": "Malioboro_3_Depan_Dispar",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_3_Depan_Dispar.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 4,
@@ -29,7 +32,8 @@
     "stream_key": "Malioboro_4_Depan_DPRD",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_4_Depan_DPRD.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 5,
@@ -37,7 +41,8 @@
     "stream_key": "Malioboro_5_Perwakilan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_5_Perwakilan.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 6,
@@ -45,7 +50,8 @@
     "stream_key": "Malioboro_6_Mall_Utara",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_6_Mall_Utara.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 7,
@@ -53,7 +59,8 @@
     "stream_key": "Malioboro_7_Mall_Selatan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_7_Mall_Selatan.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 8,
@@ -61,7 +68,8 @@
     "stream_key": "Malioboro_8_Mutiara_Lama",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_8_Mutiara_Lama.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 9,
@@ -69,7 +77,8 @@
     "stream_key": "Malioboro_9_Mutiara_Baru",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_9_Mutiara_Baru.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 10,
@@ -77,7 +86,8 @@
     "stream_key": "Malioboro_11_Terang_Bulan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_11_Terang_Bulan.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 11,
@@ -85,7 +95,8 @@
     "stream_key": "Malioboro_12_Ramayana",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_12_Ramayana.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 12,
@@ -93,7 +104,8 @@
     "stream_key": "Malioboro_13_Gunungmas",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_13_Gunungmas.stream/master.m3u8",
     "zone": "Tengah",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 13,
@@ -101,7 +113,8 @@
     "stream_key": "Malioboro_21_Utara_Inna_Malioboro",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_21_Utara_Inna_Malioboro.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 14,
@@ -109,7 +122,8 @@
     "stream_key": "Malioboro_22_Simpang_Pajeksan_Suryatmajan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_22_Simpang_Pajeksan_Suryatmajan.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 15,
@@ -117,7 +131,8 @@
     "stream_key": "Malioboro_23_Depan_BPD_Kepatihan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_23_Depan_BPD_Kepatihan.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 16,
@@ -125,7 +140,8 @@
     "stream_key": "Malioboro_24_Simpang_Reksobayan",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_24_Simpang_Reksobayan.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 17,
@@ -133,7 +149,8 @@
     "stream_key": "Malioboro_25_Utara_Mall",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_25_Utara_Mall.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 18,
@@ -141,7 +158,8 @@
     "stream_key": "Malioboro_30_Pasar_Beringharjo",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/Malioboro_30_Pasar_Beringharjo.stream/master.m3u8",
     "zone": "Utara",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 19,
@@ -149,7 +167,8 @@
     "stream_key": "NolKm_GdAgung",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/NolKm_GdAgung.stream/master.m3u8",
     "zone": "Nol KM",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 20,
@@ -157,7 +176,10 @@
     "stream_key": "NolKm_Utara",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Utara.stream/master.m3u8",
     "zone": "Nol KM",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {
+      "orang":106
+    }
   },
   {
     "id": 21,
@@ -165,7 +187,8 @@
     "stream_key": "NolKm_Timur",
     "master_url": "https://cctvjss.jogjakota.go.id/malioboro/NolKm_Timur.stream/master.m3u8",
     "zone": "Nol KM",
-    "is_ptz": false
+    "is_ptz": false,
+    "alert_thresholds": {}
   },
   {
     "id": 22,
@@ -173,6 +196,7 @@
     "stream_key": "ATCS_kmnol",
     "master_url": "https://cctvjss.jogjakota.go.id/atcs/ATCS_kmnol.stream/master.m3u8",
     "zone": "Nol KM",
-    "is_ptz": true
+    "is_ptz": true,
+    "alert_thresholds": {}
   }
 ]

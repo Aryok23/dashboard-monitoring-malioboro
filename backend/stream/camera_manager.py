@@ -1,7 +1,10 @@
+import csv
 import logging
+import os
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from typing import Callable
 
 from ..inference.detector import detect, get_counts
@@ -12,13 +15,79 @@ logger = logging.getLogger(__name__)
 _latest_jpegs: dict[int, bytes] = {}
 _latest_jpegs_lock = threading.Lock()
 
-_VEHICLE_CLASSES = {"motorcycle", "car", "bus", "truck", "bajaj", "becak", "andong", "bicycle"}
+def evaluate_threshold_alerts(camera: dict, counts: dict) -> list[tuple[str, str]]:
+    """
+    Per-camera, per-class alert thresholds from cameras.json's "alert_thresholds".
+    A class missing from a camera's dict never alerts for that camera — no
+    fallback to a global default. Returns the (alert_type, description) pairs
+    triggered this call; alert_type is always "HIGH_CROWD" (class "orang") or
+    "HIGH_TRAFFIC" (any other listed class).
+    """
+    thresholds = camera.get("alert_thresholds") or {}
+    triggered: list[tuple[str, str]] = []
+
+    crowd_limit = thresholds.get("orang")
+    people = counts.get("orang", 0)
+    if crowd_limit is not None and people > crowd_limit:
+        triggered.append(("HIGH_CROWD", f"orang={people} melebihi ambang {crowd_limit}"))
+
+    exceeded = [
+        f"{cls}={counts.get(cls, 0)}>{limit}"
+        for cls, limit in thresholds.items()
+        if cls != "orang" and counts.get(cls, 0) > limit
+    ]
+    if exceeded:
+        triggered.append(("HIGH_TRAFFIC", "Ambang kendaraan terlampaui: " + ", ".join(exceeded)))
+
+    return triggered
+
+
+# Max time to wait for a single frame in _poll_one() before giving up on that
+# camera for this round. Cooperative (calls reader.stop()), not a forced kill —
+# see HLSStreamReader.stop(). Tune via env var if healthy cameras start tripping it.
+_POLL_FRAME_TIMEOUT_SECONDS = float(os.environ.get("BACKGROUND_POLL_TIMEOUT_SECONDS", "10"))
+
+# --- background poll speed logging (pure measurement, does not affect polling logic) ---
+_POLL_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+_POLL_LOG_PATH = os.path.join(_POLL_LOG_DIR, "background_poll_speed.csv")
+_poll_log_lock = threading.Lock()
+_poll_log_header_written = False
+
+
+def _log_poll_speed(
+    camera_id: int,
+    frame_ms: float | None,
+    detect_ms: float | None,
+    total_ms: float,
+    status: str,
+) -> None:
+    global _poll_log_header_written
+    with _poll_log_lock:
+        os.makedirs(_POLL_LOG_DIR, exist_ok=True)
+        if not _poll_log_header_written:
+            _poll_log_header_written = os.path.exists(_POLL_LOG_PATH)
+        write_header = not _poll_log_header_written
+        with open(_POLL_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if write_header:
+                writer.writerow(
+                    ["timestamp", "camera_id", "frame_fetch_ms", "detect_ms", "total_ms", "status"]
+                )
+            writer.writerow([
+                datetime.now().isoformat(timespec="milliseconds"),
+                camera_id,
+                f"{frame_ms:.3f}" if frame_ms is not None else "",
+                f"{detect_ms:.3f}" if detect_ms is not None else "",
+                f"{total_ms:.3f}",
+                status,
+            ])
+        _poll_log_header_written = True
 
 
 class _ActiveCameraProcessor:
     """Two threads: one drains the HLS stream, one runs inference at a fixed interval."""
 
-    def __init__(self, camera: dict, on_active_frame: Callable, detection_interval: float = 1.0):
+    def __init__(self, camera: dict, on_active_frame: Callable, detection_interval: float = 0.5):
         self._camera = camera
         self._on_active_frame = on_active_frame
         self._detection_interval = detection_interval
@@ -80,7 +149,7 @@ class _ActiveCameraProcessor:
             if frame is not None:
                 try:
                     t0 = time.monotonic()
-                    detections = detect(frame)
+                    detections = detect(frame, camera_id=self._camera['id'])
                     logger.debug("cam %d inference=%.3fs", self._camera['id'], time.monotonic() - t0)
                     ok, buf = cv2.imencode('.jpg', frame)
                     if ok:
@@ -125,14 +194,10 @@ class _BackgroundPollingPool:
         cameras: list[dict],
         on_background_detection: Callable,
         on_background_alert: Callable,
-        people_threshold: int = 50,
-        vehicle_threshold: int = 30,
     ):
         self._cameras = cameras
         self._on_background_detection = on_background_detection
         self._on_background_alert = on_background_alert
-        self._people_threshold = people_threshold
-        self._vehicle_threshold = vehicle_threshold
 
         self._active_camera_id: int | None = None
         self._queue: deque[int] = deque()
@@ -190,38 +255,67 @@ class _BackgroundPollingPool:
             self._stop_event.wait(max(1.0, 60.0 / n))
 
     def _poll_one(self, camera: dict) -> None:
+        t_start = time.perf_counter()
+        frame_ms: float | None = None
+        detect_ms: float | None = None
+
         reader = HLSStreamReader(camera["master_url"], fps_limit=1.0)
         self._current_poll_reader = reader
         frame = None
+        t_frame_start = time.perf_counter()
+
+        timed_out = threading.Event()
+
+        def _on_frame_timeout() -> None:
+            timed_out.set()
+            reader.stop()
+
+        timeout_timer = threading.Timer(_POLL_FRAME_TIMEOUT_SECONDS, _on_frame_timeout)
+        timeout_timer.start()
         try:
             for f in reader.stream_frames():
                 frame = f
+                frame_ms = (time.perf_counter() - t_frame_start) * 1000
                 reader.stop()
                 break
         except Exception as exc:
             logger.debug("Background poll failed for camera %d: %s", camera["id"], exc)
             reader.stop()
+            status = "timeout" if timed_out.is_set() else "frame_error"
+            _log_poll_speed(
+                camera["id"], frame_ms, detect_ms, (time.perf_counter() - t_start) * 1000, status
+            )
             return
         finally:
+            timeout_timer.cancel()
             self._current_poll_reader = None
 
         if frame is None:
+            status = "timeout" if timed_out.is_set() else "no_frame"
+            _log_poll_speed(
+                camera["id"], frame_ms, detect_ms, (time.perf_counter() - t_start) * 1000, status
+            )
             return
 
+        status = "ok"
         try:
-            detections = detect(frame)
+            t_detect_start = time.perf_counter()
+            detections = detect(frame, camera_id=camera["id"])
+            detect_ms = (time.perf_counter() - t_detect_start) * 1000
             self._on_background_detection(camera["id"], detections)
 
             counts = get_counts(detections)
-            people = counts.get("people", 0)
-            vehicles = sum(counts.get(k, 0) for k in _VEHICLE_CLASSES)
-
-            if people > self._people_threshold:
-                self._on_background_alert(camera["id"], "HIGH_CROWD")
-            if vehicles > self._vehicle_threshold:
-                self._on_background_alert(camera["id"], "HIGH_TRAFFIC")
+            for alert_type, description in evaluate_threshold_alerts(camera, counts):
+                self._on_background_alert(
+                    camera["id"], alert_type, description, frame, detections, counts
+                )
         except Exception as exc:
             logger.error("Error processing background frame for camera %d: %s", camera["id"], exc)
+            status = "processing_error"
+
+        _log_poll_speed(
+            camera["id"], frame_ms, detect_ms, (time.perf_counter() - t_start) * 1000, status
+        )
 
 
 class CameraManager:
@@ -237,8 +331,6 @@ class CameraManager:
         on_active_frame: Callable,
         on_background_detection: Callable,
         on_background_alert: Callable,
-        people_threshold: int = 50,
-        vehicle_threshold: int = 30,
     ):
         self._cameras = cameras
         self._on_active_frame = on_active_frame
@@ -247,8 +339,6 @@ class CameraManager:
             cameras,
             on_background_detection,
             on_background_alert,
-            people_threshold,
-            vehicle_threshold,
         )
 
     def start(self, default_camera_id: int = 1) -> None:
